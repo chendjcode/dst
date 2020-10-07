@@ -12,6 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_ros
   roscpp
   sensor_msgs
+  cv_bridge
+  image_transport
 )
 
 ## System dependencies are found with CMake's conventions
@@ -208,6 +210,15 @@ include_directories(
 
 add_executable(plane_dst src/plane_dst.cpp)
 target_link_libraries(plane_dst ${catkin_LIBRARIES})
+
+add_executable(multi_lidar src/multi_lidar_calib.cpp)
+target_link_libraries(multi_lidar ${catkin_LIBRARIES})
+
+add_executable(camera src/camera.cpp)
+target_link_libraries(camera ${catkin_LIBRARIES})
+
+#add_executable(clustering src/clustering.cpp)
+#target_link_libraries(clustering ${catkin_LIBRARIES})
 
 #add_executable(plane_octree src/plane_octree.cpp)
 #target_link_libraries(plane_octree ${catkin_LIBRARIES})

@@ -40,7 +40,6 @@ using namespace std;
 
 struct PointLidar {
     PCL_ADD_POINT4D;                  // preferred way of adding a XYZ+padding
-    float intensity;  // intensity
     float e;    // empty
     float o;    // occupied
     float u;    // unknown
@@ -52,7 +51,7 @@ struct PointLidar {
 } EIGEN_ALIGN16;                    // enforce SSE padding for correct memory alignment
 
 POINT_CLOUD_REGISTER_POINT_STRUCT (PointLidar,
-                                   (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
+                                   (float, x, x)(float, y, y)(float, z, z)
                                            (float, e, e)
                                            (float, o, o)
                                            (float, u, u)
@@ -75,7 +74,7 @@ public:
     Node() {
         // Create a ROS subscriber for the input point cloud
         // sub = nh.subscribe("/kitti/velo/pointcloud", 1, &Node::cloud_cb, this);  // kitti
-        sub = nh.subscribe("/merge_points", 1, &Node::cloud_cb, this);
+        sub = nh.subscribe("/velodyne_points", 1, &Node::cloud_cb, this);
         // Create a ROS publisher for the output point cloud
         pub = nh.advertise<pcl::PointCloud<pcl::PointXYZRGB>>("/motion_points", 1);
         markers_pub = nh.advertise<visualization_msgs::MarkerArray>("/motion_markers", 1);
@@ -303,7 +302,7 @@ public:
     void set_Q_points() {
         if (!this->Q_points.empty())
             this->Q_points.clear();
-        auto cloud = this->cloud_queue[0];  // 利用雷达点云队列里的第一帧
+        auto cloud = this->cloud_queue[0];
         pcl::octree::OctreePointCloudSearch<PointLidar> octree(2.0f); // 设置八叉树的分辨率
         octree.setInputCloud(cloud);
         octree.addPointsFromInputCloud();
@@ -320,7 +319,7 @@ public:
     // call back
     void cloud_cb(const sensor_msgs::PointCloud2ConstPtr &input) {
         tim.tic();
-        pcl::PointCloud<pcl::PointXYZI>::Ptr _cloud(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr _cloud(new pcl::PointCloud<pcl::PointXYZ>);
         // convert
         pcl::fromROSMsg(*input, *_cloud);
         // keep header
@@ -335,7 +334,6 @@ public:
                 continue;
             PointLidar tmp{};
             tmp.x = p.x, tmp.y = p.y, tmp.z = p.z;
-            tmp.intensity = p.intensity;
             tmp.e = 0.0, tmp.o = 0.0, tmp.u = 1.0;
             tmp.cons = 0.0, tmp.conf = 0.0, tmp.unc = 1.0;
             tmp.seq = header.seq;   // 用时间来标
@@ -343,31 +341,35 @@ public:
         }
 
         cloud_queue.push_back(cloud);
-        set_Q_points();  // 我感觉随便什么时候选点都可以，但是我这里写的是会更新的
         if (cloud_queue.size() < 2) {
-            dst(cloud);
             return;
         }
 
         auto cloud_pre = cloud_queue[0];
         auto cloud_now = cloud_queue[1];
-        dst(cloud_now);  // 进行 DST 运算，只算最新一帧就可以了，入队后，下一次就变成前一帧了
+        set_Q_points();
+        std::thread dst_1(&Node::dst, this, std::ref(cloud_pre));
+        std::thread dst_2(&Node::dst, this, std::ref(cloud_now));
+
+        dst_1.join();
+        dst_2.join();
+//        dst(cloud_pre);
+//        dst(cloud_now);
 
         pcl::PointCloud<PointLidar>::Ptr cloud_ = consistency_assessment(cloud_now, cloud_pre);
         // 分割线，上面的是移动点检测算法，cloud_ 点云中为最新帧的所有点
 
         // 先将移动点和静态点分开存放
-        pcl::PointCloud<PointLidar>::Ptr cloud_motion(new pcl::PointCloud<PointLidar>);
-        pcl::PointCloud<PointLidar>::Ptr cloud_static(new pcl::PointCloud<PointLidar>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_motion(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_static(new pcl::PointCloud<pcl::PointXYZ>);
         for (auto p : cloud_->points) {
 //            std::cout << p.cons << " " << p.conf << " " << p.unc << "\n";
             if (p.seq != header.seq)
                 continue;
 //            if (abs(p.y) > 5.0 || p.x > 12.0)
 //                continue;
-            PointLidar tmp{};
+            pcl::PointXYZ tmp;
             tmp.x = p.x, tmp.y = p.y, tmp.z = p.z;
-            tmp.intensity = p.intensity;
             if ((p.conf > p.cons) || (p.unc > p.cons))
                 cloud_motion->push_back(tmp);
             else
@@ -379,13 +381,13 @@ public:
 
         // 聚类
         // Creating the KdTree object for the search method of the extraction
-        pcl::search::KdTree<PointLidar>::Ptr tree(new pcl::search::KdTree<PointLidar>);
+        pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
         tree->setInputCloud(cloud_motion);
 
         std::vector<pcl::PointIndices> cluster_indices;
-        pcl::EuclideanClusterExtraction<PointLidar> ec;
+        pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
         ec.setClusterTolerance(0.2); // 聚类 tolerance 距离，单位 m
-        ec.setMinClusterSize(50); // 聚类点最小数量
+        ec.setMinClusterSize(100); // 聚类点最小数量
         ec.setMaxClusterSize(25000);
         ec.setSearchMethod(tree);
         ec.setInputCloud(cloud_motion);
@@ -395,16 +397,15 @@ public:
         visualization_msgs::MarkerArray ma;  // markers 数组
         int count = 0;
         visualization_msgs::Marker clear_marker;
-        clear_marker.header.frame_id = "/merge";
+        clear_marker.header.frame_id = "/velodyne";
         clear_marker.header.stamp = ros::Time::now();
         clear_marker.id = count++;
         clear_marker.action = visualization_msgs::Marker::DELETEALL;
         ma.markers.push_back(clear_marker);
         for (const auto &cluster : cluster_indices) {  // 每次遍历一个聚类
-            pcl::PointCloud<PointLidar>::Ptr cloud_cluster(new pcl::PointCloud<PointLidar>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZ>);
             visualization_msgs::Marker marker;
             float xmax = -100, xmin = 100, ymax = -100, ymin = 100, zmax = -100, zmin = 100;
-            float intensity_sum = 0;
             for (auto idx : cluster.indices) {
                 auto p = cloud_motion->points[idx];
                 xmax = max(xmax, p.x);
@@ -413,14 +414,9 @@ public:
                 ymin = min(ymin, p.y);
                 zmax = max(zmax, p.z);
                 zmin = min(zmin, p.z);
-                intensity_sum += p.intensity;
                 cloud_cluster->push_back(cloud_motion->points[idx]);
             }
-            float intensity_mean = intensity_sum / cloud_cluster->size();  // 计算该聚类簇的激光强度均值
-            if (zmax - zmin > 2.0 || ymax - ymin > 1.0 || xmax - xmin > 1.0)
-                continue;
-
-            marker.header.frame_id = "/merge";
+            marker.header.frame_id = "/velodyne";
             marker.header.stamp = ros::Time::now();
             marker.id = count;
             marker.action = visualization_msgs::Marker::ADD;
@@ -440,8 +436,7 @@ public:
             cloud_cluster->width = cloud_cluster->size();
             cloud_cluster->height = 1;
             cloud_cluster->is_dense = true;
-            cout << count << "号类点的数量：" << cloud_cluster->size() << "，" << "激光强度均值：" << intensity_mean << endl;
-            count++;
+            cout << count++ << "号类点的数量：" << cloud_cluster->size() << endl;
         }
         markers_pub.publish(ma);
 
@@ -482,7 +477,7 @@ public:
         // 这个点云队列里，我存了2个点云，如果每次删除第一帧，则比较的是前后两帧
         // cloud_queue.erase(cloud_queue.begin());
         // 如果删除的最后一帧，则相当于把第一帧当做静止的背景来使用
-        cloud_queue.erase(cloud_queue.begin());
+        cloud_queue.erase(cloud_queue.end());
         tim.toc_print();
     }
 };
