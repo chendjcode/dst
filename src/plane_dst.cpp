@@ -431,8 +431,8 @@ public:
             marker.scale.x = xmax - xmin;
             marker.scale.y = ymax - ymin;
             marker.scale.z = zmax - zmin;
-            marker.color.r = 0.0f;
-            marker.color.g = 1.0f;
+            marker.color.r = 1.0f;
+            marker.color.g = 0.0f;
             marker.color.b = 0.0f;
             marker.color.a = 1.0;
             ma.markers.push_back(marker);
@@ -474,7 +474,7 @@ public:
 //            // std::cout << p.e << " " << p.o << " " << p.u << "\n";
 //            cloud_show->push_back(tmp);
         }
-        ground_remove(cloud_show);
+        // ground_remove(cloud_show);
 
         cloud_show->header = header;
         pub.publish(cloud_show);

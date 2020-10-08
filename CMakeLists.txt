@@ -217,6 +217,9 @@ target_link_libraries(multi_lidar ${catkin_LIBRARIES})
 add_executable(camera src/camera.cpp)
 target_link_libraries(camera ${catkin_LIBRARIES})
 
+add_executable(drone_track src/drone_track.cpp)
+target_link_libraries(drone_track ${catkin_LIBRARIES})
+
 #add_executable(clustering src/clustering.cpp)
 #target_link_libraries(clustering ${catkin_LIBRARIES})
 

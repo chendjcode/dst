@@ -33,8 +33,9 @@ pcl::console::TicToc tim;  // 计时器
 
 void calib(const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud0, const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud1,
            const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud2) {
+    float distance_threshold = 0.03;
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp01;
-    icp01.setMaxCorrespondenceDistance (0.05);
+    icp01.setMaxCorrespondenceDistance (distance_threshold);
     icp01.setInputSource(cloud0);
     icp01.setInputTarget(cloud1);
 
@@ -49,7 +50,7 @@ void calib(const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud0, const pcl::PointC
     std::cout << icp01.getFinalTransformation() << std::endl;
 
     pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp21;
-    icp21.setMaxCorrespondenceDistance (0.05);
+    icp21.setMaxCorrespondenceDistance (distance_threshold);
     icp21.setInputSource(cloud2);
     icp21.setInputTarget(cloud1);
 
